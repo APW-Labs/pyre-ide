@@ -1,20 +1,48 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import reactLogo from "./assets/react.svg";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+interface InterpreterMetadata {
+  path: string;
+  version?: string;
+  environment_type?: string;
+}
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+function App() {
+  const [interpreters, setInterpreters] = useState<InterpreterMetadata[] | string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function fetchInterpreters() {
+    setLoading(true);
+    setError("");
+
+    const result = await invoke("create_venv_command", {
+      projectPath: "/home/shabd-vasudeva/Projects/",
+      venvName: ".venv"
+    });
+
+    console.log("Venv created successfully:", result);
+
+    try {
+      const res = await invoke<any[]>("test_pyre_engine");
+      setInterpreters(res);
+    } catch (err) {
+      console.error(err);
+      setError(String(err));
+    } finally {
+      setLoading(false);
+    }
   }
+
+  useEffect(() => {
+    fetchInterpreters();
+  }, []);
 
   return (
     <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+      <h1>Pyre IDE - Python Engine Bridge</h1>
 
       <div className="row">
         <a href="https://vite.dev" target="_blank">
@@ -27,23 +55,24 @@ function App() {
           <img src={reactLogo} className="logo react" alt="React logo" />
         </a>
       </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
+      <div style={{ marginTop: "20px", textAlign: "left" }}>
+        <h3>Discovered Python Environments:</h3>
+        {loading && <p>Scanning system for Python interpreters...</p>}
+        {error && <p style={{ color: "red" }}>Error: {error}</p>}
+
+        <ul>
+          {interpreters.map((item, index) => (
+            <li key={index}>
+              <code>{typeof item === "string" ? item : JSON.stringify(item)}</code>
+            </li>
+          ))}
+        </ul>
+
+        <button onClick={fetchInterpreters} style={{ marginTop: "10px" }}>
+          Re-scan Interpreters
+        </button>
+      </div>
     </main>
   );
 }
