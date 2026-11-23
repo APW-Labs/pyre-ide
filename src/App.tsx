@@ -32,10 +32,10 @@ function App() {
   }
 
   async function runTestScript() {
+    setError("");
     try {
-      // Use absolute path of python discovered or standard one
       const pythonPath = "/usr/bin/python3";
-      const scriptPath = "/home/shabd-vasudeva/pyre-ide/src-tauri/src/test_script.py";
+      const scriptPath = "/home/shabdvasudeva/Projects/pyre-ide/src-tauri/src/test_script.py";
 
       const pid = await invoke("run_python_script_command", {
         pythonPath,
@@ -93,7 +93,7 @@ function App() {
         </button>
 
         <h3>Live Script Output:</h3>
-        <div style={{ background: "#1e1e1e", color: "#00ffcc", padding: "10px", borderRadius: "5px", height: "150px", overflowY: "auto", fontFamily: "monospace" }}>
+        <div style={{ background: "#1e1e1e", color: "#ff0000", padding: "10px", borderRadius: "5px", height: "150px", overflowY: "auto", fontFamily: "monospace" }}>
           {logs.length === 0 ? <p style={{ color: "#888" }}>No output yet. Click 'Run Test Python Script'.</p> : null}
           {logs.map((log, idx) => (
             <div key={idx}>{log}</div>

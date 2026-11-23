@@ -1,8 +1,8 @@
 import sys
 import time
 
-with open("/home/shabd-vasudeva/pyre-ide/python_debug.log", "w") as f:
-    f.write("Python script started successfully!\n")
+# with open("/home/shabdvasudeva/Projects/pyre-ide/src-tauri/src/test_script.log", "w") as f:
+#     f.write("Python script started successfully!\n")
 
 print("Pyre IDE Engine Test: Starting...", flush=True)
 for i in range(3):

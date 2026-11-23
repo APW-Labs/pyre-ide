@@ -1,7 +1,6 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, time::Duration};
 use tauri::{AppHandle, Emitter};
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use pyre_python_engine::{
     self, InterpreterMetadata, ProcessOutput, ProcessSupervisor, supervisor,
     venv::{VenvManager, VenvMetadata},
@@ -38,27 +37,23 @@ async fn create_venv_command(
 
 #[tauri::command]
 async fn run_python_script_command(
-    app: AppHandle,
+    app: tauri::AppHandle,
     python_path: String,
     script_path: String,
 ) -> Result<u32, String> {
-    let py_path: PathBuf = PathBuf::from(python_path);
-    let scr_path: PathBuf = PathBuf::from(script_path);
+    let py_path = PathBuf::from(python_path);
+    let scr_path = PathBuf::from(script_path);
     let empty_env = HashMap::new();
     let empty_args = vec![];
 
-    let (supervisor, mut rx) =
-        match ProcessSupervisor::spawn(&py_path, &scr_path, &empty_args, &empty_env, None).await {
-            Ok(res) => res,
-            Err(e) => {
-                eprintln!("FAILED TO SPAWN PYTHON SCRIPT: {:?}", e);
-                return Err(e.to_string());
-            }
-        };
+    let (mut supervisor, mut rx) =
+        ProcessSupervisor::spawn(&py_path, &scr_path, &empty_args, &empty_env, None)
+            .await
+            .map_err(|e| e.to_string())?;
 
     let pid = supervisor.pid();
 
-    spawn(async move {
+    tokio::spawn(async move {
         while let Some(output) = rx.recv().await {
             match output {
                 ProcessOutput::Stdout(line) => {
@@ -69,6 +64,8 @@ async fn run_python_script_command(
                 }
             }
         }
+
+        let _ = supervisor.wait_with_timeout(Duration::from_secs(300)).await;
     });
 
     Ok(pid)
