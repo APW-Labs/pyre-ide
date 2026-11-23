@@ -1,12 +1,24 @@
-use std::{collections::HashMap, path::PathBuf, time::Duration};
-use tauri::{AppHandle, Emitter};
+use std::{collections::HashMap, path::PathBuf, sync::{Arc, Mutex}, time::Duration};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, State};
 
 use pyre_python_engine::{
-    self, InterpreterMetadata, ProcessOutput, ProcessSupervisor, supervisor,
+    self, InterpreterMetadata, ProcessOutput, ProcessSupervisor,
     venv::{VenvManager, VenvMetadata},
 };
 
-use tokio::spawn;
+use tokio::sync::oneshot;
+
+#[derive(Clone, Serialize)]
+struct PythonExitPayload {
+    pid: u32,
+    exit_code: Option<i32>
+}
+
+#[derive(Default)]
+struct ProcessRegistry {
+    kill_senders: Arc<Mutex<HashMap<u32, tokio::sync::oneshot::Sender<()>>>>
+}
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -37,7 +49,8 @@ async fn create_venv_command(
 
 #[tauri::command]
 async fn run_python_script_command(
-    app: tauri::AppHandle,
+    app: AppHandle,
+    registry: State<'_, ProcessRegistry>,
     python_path: String,
     script_path: String,
 ) -> Result<u32, String> {
@@ -52,34 +65,94 @@ async fn run_python_script_command(
             .map_err(|e| e.to_string())?;
 
     let pid = supervisor.pid();
+    let (kill_tx, mut kill_rx) = oneshot::channel::<()>();
+
+    {
+        let mut map = registry.kill_senders.lock().unwrap_or_else(|e| e.into_inner());
+        map.insert(pid, kill_tx);
+    }
+
+    let kill_senders_cleanup = registry.kill_senders.clone();
 
     tokio::spawn(async move {
-        while let Some(output) = rx.recv().await {
-            match output {
-                ProcessOutput::Stdout(line) => {
-                    let _ = app.emit("python-stdout", line);
+        let mut killed = false;
+
+        loop {
+            tokio::select! {
+                _ = &mut kill_rx => {
+                    killed = true;
+                    let _ = supervisor.terminate_tree().await;
+                    break;
                 }
-                ProcessOutput::Stderr(line) => {
-                    let _ = app.emit("python-stderr", line);
+                maybe_output = rx.recv() => {
+                    match maybe_output {
+                        Some(ProcessOutput::Stdout(line)) => {
+                            let _ = app.emit("python-stdout", line);
+                        }
+                        Some(ProcessOutput::Stderr(line)) => {
+                            let _ = app.emit("python-stderr", line);
+                        }
+                        None => break,
+                    }
                 }
             }
         }
 
-        let _ = supervisor.wait_with_timeout(Duration::from_secs(300)).await;
+        let exit_code = if killed {
+            None
+        } else {
+            supervisor
+                .wait_with_timeout(Duration::from_secs(300))
+                .await
+                .ok()
+        };
+
+        {
+            let mut map = kill_senders_cleanup.lock().unwrap_or_else(|e| e.into_inner());
+            map.remove(&pid);
+        }
+
+        let _ = app.emit(
+            "python-exit",
+            PythonExitPayload { pid, exit_code },
+        );
     });
 
     Ok(pid)
+}
+
+#[tauri::command]
+async fn stop_python_script_command(
+    registry: State<'_, ProcessRegistry>,
+    pid: u32,
+) -> Result<(), String> {
+    let sender = {
+        let mut map = registry
+            .kill_senders
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        map.remove(&pid)
+    };
+
+    if let Some(tx) = sender {
+        let _ = tx.send(());
+        Ok(())
+    } else {
+        Err(format!("No active process found with PID {}", pid))
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(ProcessRegistry::default())
         .invoke_handler(tauri::generate_handler![
             greet,
             test_pyre_engine,
             create_venv_command,
-            run_python_script_command
+            run_python_script_command,
+            stop_python_script_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
