@@ -57,6 +57,13 @@ function App() {
       setLogs((prev) => [...prev, `[STDOUT]: ${event.payload}`]);
     });
 
+    const unlistenExit = listen<{ pid: number; exit_code: number | null }>("python-exit", (event) => {
+      setLogs((prev) => [
+        ...prev,
+        `[EXIT] PID ${event.payload.pid} finished with code: ${event.payload.exit_code ?? "N/A"}`,
+      ]);
+    });
+
     const unlistenStderr = listen<string>("python-stderr", (event) => {
       console.error("EVENT RECEIVED STDERR:", event.payload);
       setLogs((prev) => [...prev, `[STDERR]: ${event.payload}`]);
@@ -65,6 +72,7 @@ function App() {
     return () => {
       unlistenStdout.then((f) => f());
       unlistenStderr.then((f) => f());
+      unlistenExit.then((f) => f());
     };
   }, []);
 
